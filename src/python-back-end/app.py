@@ -187,13 +187,32 @@ async def transcribe(file: UploadFile, recording_id: str = Form(...), speaker_na
     return {"text": text}
 
 def extractTextFromAudio(audio_bytes):
+    if asr_pipeline is None:
+        print("ASR pipeline not available")
+        return "[ASR unavailable]"
+
     wav = convert_to_wav(audio_bytes)
     wav.seek(0)
 
-    result = asr_pipeline(wav)
-    text = result["text"]
-    return text
+    try:
+        result = asr_pipeline(wav)
+    except Exception as e1:
+        wav.seek(0)
+        waveform, sr = torchaudio.load(wav)
 
+        # Collapse multi-channel to mono by averaging channels, convert to numpy float32
+        if waveform.ndim > 1:
+            arr = waveform.mean(dim=0).cpu().numpy().astype("float32")
+        else:
+            arr = waveform.squeeze().cpu().numpy().astype("float32")
+        print(f"VINAY_DEBUG: Converted waveform to array with shape {arr.shape}, arr.ndim: {arr.ndim}")
+        result = asr_pipeline(arr)
+        
+    # result is usually a dict with 'text'
+    if isinstance(result, dict):
+        return result.get("text")
+    else:
+        return str(result)
 
 @app.get("/transcripts")
 def transcripts():
