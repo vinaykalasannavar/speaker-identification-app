@@ -8,6 +8,7 @@ interface TranscriptEntry {
   message: string;
   audioBlob: Blob | null;
   speaker: string;
+  timestamp: string;
 }
 
 function App() {
@@ -45,6 +46,7 @@ function App() {
           message: item.message,
           audioBlob: blob,
           speaker: item.name,
+          timestamp: item.timestamp || "",
         };
       });
 
@@ -95,6 +97,7 @@ function App() {
    // ✅ ADD DIRECTLY TO HISTORY (no extra API call)
    if (endpoint === "enroll") {
      const text = res.data.text ?? "";
+     const timestamp = res.data.timestamp ?? "";
 
      setPreviousTranscripts((prev) => [
        {
@@ -103,6 +106,7 @@ function App() {
          message: text,
          audioBlob: audioBlob,
          speaker: name,
+         timestamp: timestamp,
        },
        ...prev,
      ]);
@@ -117,6 +121,15 @@ function App() {
   ) => {
     if (!inputAudioBlob) return;
 
+    // If retranscribing, set message to "re-transcribing..."
+    if (audioSampleId) {
+      setPreviousTranscripts((prev) =>
+        prev.map((entry) =>
+          entry.id === audioSampleId ? { ...entry, message: "re-transcribing..." } : entry
+        )
+      );
+    }
+
     const formData = new FormData();
     formData.append("file", inputAudioBlob, "audio.webm");
 
@@ -126,6 +139,7 @@ function App() {
 
     const res = await axios.post(`${BACKEND_URL}/transcribe`, formData);
     const text = res.data.text ?? "";
+    const timestamp = res.data.timestamp ?? "";
 
     if (audioSampleId == null) {
       setPreviousTranscripts((prev) => [
@@ -135,15 +149,24 @@ function App() {
           message: text,
           audioBlob: inputAudioBlob,
           speaker: speakerName,
+          timestamp: timestamp,
         },
         ...prev,
       ]);
     } else {
       setPreviousTranscripts((prev) =>
         prev.map((entry) =>
-          entry.id === audioSampleId ? { ...entry, message: text } : entry
+          entry.id === audioSampleId ? { ...entry, message: text, timestamp: timestamp } : entry
         )
       );
+      // Update the output-message with the returned data in enroll-like format
+      const retranscribeResult = {
+        message: `Re-transcribed sample for ${speakerName}`,
+        recording_id: audioSampleId,
+        text: text,
+        timestamp: timestamp
+      };
+      setResult(retranscribeResult);
     }
   };
 
@@ -271,7 +294,7 @@ function App() {
           🧹 Clear All
         </button>
 
-        {result && <pre>{JSON.stringify(result, null, 2)}</pre>}
+        {result && <pre data-name="output-message">{JSON.stringify(result, null, 2)}</pre>}
 
         {previousTranscripts.length > 0 && (
           <div>
@@ -283,6 +306,7 @@ function App() {
                   <th>ID</th>
                   <th>Name</th>
                   <th>Message</th>
+                  <th>Timestamp</th>
                   <th>Play</th>
                   <th>Re-transcribe</th>
                   <th>Delete</th>
@@ -295,6 +319,7 @@ function App() {
                     <td>({entry.id.slice(-4)})</td>
                     <td>{entry.name}</td>
                     <td>{entry.message}</td>
+                    <td>{entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ""}</td>
 
                     <td>
                       <button onClick={() => entry.audioBlob && playThisAudio(entry.audioBlob)}>
@@ -303,7 +328,7 @@ function App() {
                     </td>
 
                     <td>
-                      <button onClick={() => transcribe(entry.audioBlob, entry.id, entry.name)}>
+                      <button data-name="retranscribe" onClick={() => transcribe(entry.audioBlob, entry.id, entry.name)}>
                         🔁
                       </button>
                     </td>

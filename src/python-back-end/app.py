@@ -13,6 +13,7 @@ import json
 import ffmpeg
 from azure.cosmos import CosmosClient, PartitionKey
 import os
+import datetime
 
 # -------------------------------
 # CONFIG
@@ -136,12 +137,14 @@ async def enroll(file: UploadFile, name: str, recording_id: str = Form(...)):
 
     audio_base64 = base64.b64encode(audio_bytes).decode()
     text = extractTextFromAudio(audio_bytes)
+    timestamp = datetime.datetime.now().isoformat()
 
     speaker_db.setdefault(name, []).append({
         "id": recording_id,
         "embedding": emb.tolist(),
         "audio_base64": audio_base64,
-        "message": text
+        "message": text,
+        "timestamp": timestamp
     })
 
     count = len(speaker_db[name])
@@ -149,7 +152,8 @@ async def enroll(file: UploadFile, name: str, recording_id: str = Form(...)):
     return {
         "message": f"Added sample {count} for {name}",
         "recording_id": recording_id,
-        "text": text
+        "text": text,
+        "timestamp": timestamp
     }
 
 
@@ -178,13 +182,15 @@ async def identify(file: UploadFile):
 async def transcribe(file: UploadFile, recording_id: str = Form(...), speaker_name: str = Form("unknown")):
     audio_bytes = await file.read()
     text = extractTextFromAudio(audio_bytes)
+    timestamp = datetime.datetime.now().isoformat()
 
     if speaker_name in speaker_db:
         for r in speaker_db[speaker_name]:
             if r["id"] == recording_id:
                 r["message"] = text
+                r["timestamp"] = timestamp
 
-    return {"text": text}
+    return {"text": text, "timestamp": timestamp}
 
 def extractTextFromAudio(audio_bytes):
     if asr_pipeline is None:
@@ -223,7 +229,8 @@ def transcripts():
                 "id": r["id"],
                 "name": name,
                 "message": r["message"],
-                "audio_base64": r["audio_base64"]
+                "audio_base64": r["audio_base64"],
+                "timestamp": r.get("timestamp", "")
             })
     return out
 
