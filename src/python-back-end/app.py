@@ -97,44 +97,52 @@ def convert_to_wav(audio_bytes):
 def get_embedding(audio_bytes):
     wav_buffer = convert_to_wav(audio_bytes)
     wav_buffer.seek(0)
-    
+
     # Load wav using scipy instead of torchaudio to avoid torchcodec issues
     sample_rate, waveform_numpy = wavfile.read(wav_buffer)
-    
+
     # Convert numpy array to torch tensor
     waveform = torch.from_numpy(waveform_numpy.copy()).float()
-    
+
     # Handle mono vs stereo
     if waveform.ndim == 1:
         waveform = waveform.unsqueeze(0)
     elif waveform.shape[0] > 1:
         # Take first channel if stereo
         waveform = waveform[0].unsqueeze(0)
-    
+
     if sample_rate != 16000:
         waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
     emb = spkrec.encode_batch(waveform)
-    emb = emb.mean(dim=0).detach().cpu().numpy()
-    
+    # Convert to numpy
+    emb = emb.mean(dim=0).detach().cpu().numpy().squeeze()
+    # Normalize embedding
+    emb = emb / np.linalg.norm(emb)
+
     # print("Generated embedding:")
     # print("Embedding shape:", emb.shape)
     # print("Embedding ndim:", emb.ndim)
     # print("Embedding size:", emb.size)
     # print("Embedding dtype:", emb.dtype)
-    
+
     return emb
 
 
 def average_embeddings(embeddings):
-    
-    # print(f'VINAY_DEBUG: Averaging embeddings shape', embeddings.shape if isinstance(embeddings, np.ndarray) else 'list of length ' + str(len(embeddings)))
-    arr = np.stack(embeddings)
-    # print(f'VINAY_DEBUG: Stacked embeddings shape', arr.shape)
+
+    # Normalize every enrolled embedding first
+    normalized_embeddings = []
+
+    for emb in embeddings:
+        emb = np.asarray(emb)
+        emb = emb / np.linalg.norm(emb)
+        normalized_embeddings.append(emb)
+    arr = np.stack(normalized_embeddings)
 
     avg = arr.mean(axis=0)
-    print(f'VINAY_DEBUG: Mean embedding shape', avg[0:5])
+    # Normalize averaged template
     avg /= np.linalg.norm(avg)
-    print(f'VINAY_DEBUG: Averaged embedding shape', avg[0:5])
+    print(f'VINAY_DEBUG: Mean embedding shape {avg[0:5]}')
     return avg
 
 
@@ -173,17 +181,21 @@ async def identify(file: UploadFile):
     audio_bytes = await file.read()
     test_emb = get_embedding(audio_bytes)
 
-    best_name, best_score = None, -1
+    best_name, best_score = None, -1.0
 
     for name, recs in speaker_db.items():
         embeddings = [np.array(r["embedding"]) for r in recs]
         avg = average_embeddings(embeddings)
-        score = float(np.dot(test_emb, avg.T))
+        # Cosine similarity
+        score = float(np.dot(test_emb, avg)/ (np.linalg.norm(test_emb) * np.linalg.norm(avg)))
 
         if score > best_score:
-            best_score, best_name = score, name
+            best_score = score
+            best_name = name
 
-    return {"speaker": best_name, "score": best_score}
+    confidence_percent = round(max(0.0, best_score) * 100.0, 2)
+
+    return {"speaker": best_name, "score": confidence_percent, "raw_similarity": round(best_score, 4)}
 
 
 @app.post("/transcribe")
