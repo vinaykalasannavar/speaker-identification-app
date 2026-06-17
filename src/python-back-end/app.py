@@ -99,7 +99,7 @@ def get_embedding(audio_bytes):
     wav_buffer.seek(0)
     
     # Load wav using scipy instead of torchaudio to avoid torchcodec issues
-    sr, waveform_numpy = wavfile.read(wav_buffer)
+    sample_rate, waveform_numpy = wavfile.read(wav_buffer)
     
     # Convert numpy array to torch tensor
     waveform = torch.from_numpy(waveform_numpy.copy()).float()
@@ -111,8 +111,8 @@ def get_embedding(audio_bytes):
         # Take first channel if stereo
         waveform = waveform[0].unsqueeze(0)
     
-    if sr != 16000:
-        waveform = torchaudio.functional.resample(waveform, sr, 16000)
+    if sample_rate != 16000:
+        waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
     emb = spkrec.encode_batch(waveform)
     emb = emb.mean(dim=0).detach().cpu().numpy()
     
