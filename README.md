@@ -11,7 +11,7 @@ Provides a user-friendly UI to record audio samples to:
 - Identify whom a voice belongs to (test data).
 - Here's how the UI looks:
   - After recording a few samples,
-  - Followed by attempt to identify an user.
+  - Followed by attempt to identify a user.
 ![Demo Screenshot](docs/DemoScreenshot.png)
 
 ### Tech spec:
