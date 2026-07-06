@@ -114,10 +114,16 @@ def get_embedding(audio_bytes):
     if sample_rate != 16000:
         waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
     emb = spkrec.encode_batch(waveform)
+    # print(f'emb = {emb}')
+    # print(f'emb shape = {np.shape(emb)}')
     # Convert to numpy
     emb = emb.mean(dim=0).detach().cpu().numpy().squeeze()
+    # print(f'emb mean shape = {np.shape(emb)}')
+    
     # Normalize embedding
     emb = emb / np.linalg.norm(emb)
+
+    # print(f'emb np.linalg.norm shape = {np.shape(emb)}')
 
     # print("Generated embedding:")
     # print("Embedding shape:", emb.shape)
@@ -186,8 +192,18 @@ async def identify(file: UploadFile):
     for name, recs in speaker_db.items():
         embeddings = [np.array(r["embedding"]) for r in recs]
         avg = average_embeddings(embeddings)
+        
+        print(f'{name} avg = {avg}')
+        print(f'{name} embeddings={embeddings}')
+
+        
+        print(f'{name} avg.shape = {np.shape(avg)}')
+        print(f'{name} embeddings.shape={np.shape(embeddings)}')
+        
         # Cosine similarity
         score = float(np.dot(test_emb, avg)/ (np.linalg.norm(test_emb) * np.linalg.norm(avg)))
+        
+        print(f'VINAY: score for {name} = {score}')
 
         if score > best_score:
             best_score = score
