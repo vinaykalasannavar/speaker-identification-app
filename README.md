@@ -1,13 +1,11 @@
 # Speaker Identification App
 
-An AI-powered speaker identification application built with React and FastAPI.
+An AI-powered speaker identification and speech-to-text application built with React, FastAPI, SpeechBrain and OpenAI Whisper.
 
 The application allows users to enrol multiple voice samples, identify speakers from new recordings using SpeechBrain's ECAPA-TDNN model, and automatically transcribe speech using OpenAI Whisper.
 
 ## Screenshot
-Here's how the app's UI looks:
-- After recording a few samples,
-- Followed by attempt to identify a user.
+The application after enrolling several speakers and identifying a new recording:
 ![Demo Screenshot](docs/DemoScreenshot.png)
 
 ## Features
