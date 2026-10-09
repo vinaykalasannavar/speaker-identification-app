@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { BACKEND_URL } from "./config";
 
@@ -16,6 +16,10 @@ function App() {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [result, setResult] = useState<object | null>(null);
   const [previousTranscripts, setPreviousTranscripts] = useState<TranscriptEntry[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const levelFillRef = useRef<HTMLSpanElement>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const [countdown, setCountdown] = useState(0);
 
   useEffect(() => {
     loadTranscripts();
@@ -56,22 +60,78 @@ function App() {
     }
   };
 
+  const RECORDING_DURATION_SECONDS = 3;
+
   const startRecording = () => {
     setAudioBlob(null);
+    // Give instant feedback: getUserMedia can take several hundred ms to open the mic
+    setIsStarting(true);
 
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+    navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    }).then((stream) => {
       const mediaRecorder = new MediaRecorder(stream);
       const chunks: BlobPart[] = [];
+
+      // Real-time level meter so the user can see when they're actually speaking
+      const audioContext = new AudioContext();
+      audioContext.resume();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const timeDomainData = new Uint8Array(analyser.fftSize);
+
+      let animationFrameId: number;
+      const updateLevel = () => {
+        analyser.getByteTimeDomainData(timeDomainData);
+        let sumSquares = 0;
+        for (let i = 0; i < timeDomainData.length; i++) {
+          const normalized = (timeDomainData[i] - 128) / 128;
+          sumSquares += normalized * normalized;
+        }
+        const rms = Math.sqrt(sumSquares / timeDomainData.length);
+        // Update the DOM directly to avoid re-rendering the component every frame
+        const level = Math.min(100, Math.round(Math.sqrt(rms) * 250));
+        if (levelFillRef.current) levelFillRef.current.style.width = `${level}%`;
+        animationFrameId = requestAnimationFrame(updateLevel);
+      };
+      updateLevel();
+
+      const countdownInterval = setInterval(() => {
+        setCountdown((prev) => Math.max(0, prev - 1));
+      }, 1000);
+
+      const cleanup = () => {
+        cancelAnimationFrame(animationFrameId);
+        clearInterval(countdownInterval);
+        if (levelFillRef.current) levelFillRef.current.style.width = "0%";
+        setCountdown(0);
+        setIsRecording(false);
+        source.disconnect();
+        audioContext.close();
+        stream.getTracks().forEach((track) => track.stop());
+      };
 
       mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunks, { type: "audio/webm" });
         setAudioBlob(blob);
+        cleanup();
       };
 
+      // Start the visible timer only once the recorder is really capturing
+      mediaRecorder.onstart = () => {
+        setIsStarting(false);
+        setIsRecording(true);
+        setCountdown(RECORDING_DURATION_SECONDS);
+        setTimeout(() => mediaRecorder.stop(), RECORDING_DURATION_SECONDS * 1000);
+      };
       mediaRecorder.start();
-      setTimeout(() => mediaRecorder.stop(), 3000);
+    }).catch((err) => {
+      console.error("Microphone access failed", err);
+      setIsStarting(false);
     });
   };
 
@@ -248,6 +308,31 @@ function App() {
           background-color: #d9534f;
         }
 
+        .recording-indicator {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          margin-left: 8px;
+          vertical-align: middle;
+        }
+
+        .level-meter-track {
+          display: inline-block;
+          vertical-align: middle;
+          width: 120px;
+          height: 10px;
+          background-color: #ddd;
+          border-radius: 5px;
+          overflow: hidden;
+        }
+
+        .level-meter-fill {
+          display: block;
+          height: 100%;
+          background-color: #2ba276;
+          transition: width 60ms linear;
+        }
+
         table {
           width: 100%;
           border-collapse: collapse;
@@ -274,7 +359,7 @@ function App() {
       `}</style>
 
       <div className="app-container">
-        <h2>🎤 Fun Speaker ID App</h2>
+        <h2>🎤 Speaker Identification Application</h2>
 
         <input
           type="text"
@@ -287,7 +372,18 @@ function App() {
           Enroll
         </button>
 
-        <button onClick={startRecording}>🎙️ Record 3s</button>
+        <button onClick={startRecording} disabled={isRecording || isStarting}>
+          {isStarting ? "⏳ Starting mic..." : "🎙️ Record 3s"}
+        </button>
+
+        {(
+          <span className="recording-indicator">
+            <span style={{ opacity: isRecording ? 1 : 0.4 }}>🔴 Recording... {countdown}s</span>
+            <span className="level-meter-track">
+              <span className="level-meter-fill" ref={levelFillRef} />
+            </span>
+          </span>
+        )}
 
         <button onClick={() => audioBlob && playThisAudio(audioBlob)} disabled={!audioBlob}>
           ▶️ Play Recorded Message
