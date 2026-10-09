@@ -286,10 +286,28 @@ function App() {
     }
   };
 
+  // Shows the identify "score" as `"confidence": 41.44%`
+  const formatResult = (data: object) => {
+    const shown = Object.fromEntries(
+      Object.entries(data).map(([key, value]) =>
+        key === "score" && typeof value === "number"
+          ? ["confidence", `__PCT__${value}__`]
+          : [key, value]
+      )
+    );
+    return JSON.stringify(shown, null, 2).replace(/"__PCT__(.*?)__"/g, "$1%");
+  };
+
   const playThisAudio = (blob: Blob) => {
     const url = URL.createObjectURL(blob);
     new Audio(url).play();
   };
+
+  const identifyResult = result as { speaker?: string; score?: number } | null;
+  const identifyMessage =
+    identifyResult && identifyResult.speaker && typeof identifyResult.score === "number"
+      ? `I'm ${identifyResult.score}% sure that you're ${identifyResult.speaker}!`
+      : null;
 
   return (
     <>
@@ -353,6 +371,21 @@ function App() {
 
         .draft-text {
           font-style: italic;
+        }
+
+        .identify-message {
+          padding: 6px 12px;
+          border-radius: 16px;
+          background-color: #fff3cd;
+          border: 1px solid #f0ad4e;
+          color: #5c3d00;
+          font-weight: bold;
+          animation: identify-pop 0.4s ease-out;
+        }
+
+        @keyframes identify-pop {
+          from { transform: scale(0.85); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
 
         .toolbar-row {
@@ -472,10 +505,12 @@ function App() {
             <button onClick={() => sendToServer("identify")}>
               👤 Identify Me
             </button>
+
+            {identifyMessage && <span className="identify-message" data-name="identify-message">{identifyMessage}</span>}
           </div>
         </div>
 
-        {result && <pre data-name="output-message">{JSON.stringify(result, null, 2)}</pre>}
+        {result && <pre data-name="output-message">{formatResult(result)}</pre>}
 
         {previousTranscripts.length > 0 && (
           <div>
