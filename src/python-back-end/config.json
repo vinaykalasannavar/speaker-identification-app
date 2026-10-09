@@ -5,5 +5,11 @@
     "host": "0.0.0.0",
     "port": 8000,
     "database_name": "speakerdb",
-    "container_name": "speakers"
+    "container_name": "speakers",
+    "vad": {
+        "frame_ms": 30,
+        "energy_threshold_db": -40.0,
+        "padding_ms": 150,
+        "min_speech_ms": 300
+    }
 }
