@@ -20,6 +20,31 @@ function App() {
   const levelFillRef = useRef<HTMLSpanElement>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [draftText, setDraftText] = useState<string | null>(null);
+  const [isTranscribingDraft, setIsTranscribingDraft] = useState(false);
+
+  const transcribeDraft = async (blob: Blob) => {
+    setIsTranscribingDraft(true);
+    setDraftText(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", blob, "audio.webm");
+      formData.append("recording_id", crypto.randomUUID());
+      formData.append("speaker_name", "unknown");
+      const res = await axios.post(`${BACKEND_URL}/transcribe`, formData);
+      setDraftText(res.data.text ?? "");
+    } catch (err) {
+      console.error("Draft transcription failed", err);
+      setDraftText("[Transcription failed - try again]");
+    } finally {
+      setIsTranscribingDraft(false);
+    }
+  };
+
+  const discardDraft = () => {
+    setAudioBlob(null);
+    setDraftText(null);
+  };
 
   useEffect(() => {
     loadTranscripts();
@@ -64,6 +89,7 @@ function App() {
 
   const startRecording = () => {
     setAudioBlob(null);
+    setDraftText(null);
     // Give instant feedback: getUserMedia can take several hundred ms to open the mic
     setIsStarting(true);
 
@@ -118,6 +144,7 @@ function App() {
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunks, { type: "audio/webm" });
         setAudioBlob(blob);
+        transcribeDraft(blob);
         cleanup();
       };
 
@@ -308,6 +335,38 @@ function App() {
           background-color: #d9534f;
         }
 
+        .toolbar {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin-bottom: 16px;
+        }
+
+        .draft-box {
+          border: 1px solid #ccc;
+          border-radius: 6px;
+          padding: 8px 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .draft-text {
+          font-style: italic;
+        }
+
+        .toolbar-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .toolbar-row button,
+        .toolbar-row input {
+          margin: 0;
+        }
+
         .recording-indicator {
           display: inline-flex;
           align-items: center;
@@ -361,41 +420,60 @@ function App() {
       <div className="app-container">
         <h2>🎤 Speaker Identification Application</h2>
 
-        <input
-          type="text"
-          placeholder="Friend's name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
+        <div className="toolbar">
+          <div className="toolbar-row">
+            <button onClick={startRecording} disabled={isRecording || isStarting}>
+              {isStarting ? "⏳ Starting mic..." : "🎙️ Record 3s"}
+            </button>
 
-        <button onClick={() => sendToServer("enroll")} disabled={!name || !audioBlob}>
-          Enroll
-        </button>
-
-        <button onClick={startRecording} disabled={isRecording || isStarting}>
-          {isStarting ? "⏳ Starting mic..." : "🎙️ Record 3s"}
-        </button>
-
-        {(
-          <span className="recording-indicator">
-            <span style={{ opacity: isRecording ? 1 : 0.4 }}>🔴 Recording... {countdown}s</span>
-            <span className="level-meter-track">
-              <span className="level-meter-fill" ref={levelFillRef} />
+            <span className="recording-indicator">
+              <span style={{ opacity: isRecording ? 1 : 0.4 }}>🔴 Recording... {countdown}s</span>
+              <span className="level-meter-track">
+                <span className="level-meter-fill" ref={levelFillRef} />
+              </span>
             </span>
-          </span>
-        )}
 
-        <button onClick={() => audioBlob && playThisAudio(audioBlob)} disabled={!audioBlob}>
-          ▶️ Play Recorded Message
-        </button>
+            <button onClick={() => audioBlob && playThisAudio(audioBlob)} disabled={!audioBlob}>
+              ▶️ Play Recorded Message
+            </button>
+          </div>
 
-        <button onClick={() => sendToServer("identify")}>
-          👤 Identify Me
-        </button>
+          {(isTranscribingDraft || draftText !== null) && (
+            <div className="draft-box">
+              <div className="draft-text">
+                {isTranscribingDraft ? "⏳ Transcribing..." : <>📝 “{draftText}”</>}
+              </div>
+              <div className="toolbar-row">
+                <button
+                  onClick={() => audioBlob && transcribeDraft(audioBlob)}
+                  disabled={!audioBlob || isTranscribingDraft}
+                >
+                  🔁 Re-transcribe
+                </button>
+                <button className="danger" onClick={discardDraft} disabled={isTranscribingDraft}>
+                  🚫 Discard
+                </button>
+              </div>
+            </div>
+          )}
 
-        <button className="danger" onClick={clearAll} disabled={!(previousTranscripts.length > 0)}>
-          🧹 Clear All
-        </button>
+          <div className="toolbar-row">
+            <input
+              type="text"
+              placeholder="Friend's name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+
+            <button onClick={() => sendToServer("enroll")} disabled={!name || !audioBlob || isTranscribingDraft}>
+              Enroll
+            </button>
+
+            <button onClick={() => sendToServer("identify")}>
+              👤 Identify Me
+            </button>
+          </div>
+        </div>
 
         {result && <pre data-name="output-message">{JSON.stringify(result, null, 2)}</pre>}
 
@@ -412,7 +490,12 @@ function App() {
                   <th>Timestamp</th>
                   <th>Play</th>
                   <th>Re-transcribe</th>
-                  <th>Delete</th>
+                  <th>
+                    Delete{" "}
+                    <button className="danger" onClick={clearAll} title="Delete all recordings">
+                      🗑️ Clear All
+                    </button>
+                  </th>
                 </tr>
               </thead>
 
