@@ -40,6 +40,12 @@ except Exception as _e:
 DATABASE_NAME = config.get("database_name", "speakerdb")
 CONTAINER_NAME = config.get("container_name", "speakers")
 
+VAD_CONFIG = config.get("vad", {})
+VAD_FRAME_MS = VAD_CONFIG.get("frame_ms", 30)
+VAD_ENERGY_THRESHOLD_DB = VAD_CONFIG.get("energy_threshold_db", -40.0)
+VAD_PADDING_MS = VAD_CONFIG.get("padding_ms", 150)
+VAD_MIN_SPEECH_MS = VAD_CONFIG.get("min_speech_ms", 300)
+
 # -------------------------------
 # APP INIT
 # -------------------------------
@@ -94,6 +100,39 @@ def convert_to_wav(audio_bytes):
     return out_buffer
 
 
+def trim_silence(samples: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Trim leading/trailing silence using frame-based RMS energy thresholding."""
+    frame_len = max(1, int(sample_rate * VAD_FRAME_MS / 1000))
+    num_frames = len(samples) // frame_len
+    if num_frames == 0:
+        return samples
+
+    frames = samples[:num_frames * frame_len].reshape(num_frames, frame_len)
+    rms = np.sqrt(np.mean(frames.astype(np.float64) ** 2, axis=1) + 1e-12)
+    peak = np.max(np.abs(samples)) + 1e-12
+    rms_db = 20 * np.log10(rms / peak + 1e-12)
+
+    speech_frames = np.where(rms_db > VAD_ENERGY_THRESHOLD_DB)[0]
+    if speech_frames.size == 0:
+        # No frame crossed the threshold; leave audio untouched rather than trim everything
+        return samples
+
+    padding_frames = max(1, int(VAD_PADDING_MS / VAD_FRAME_MS))
+    start_frame = max(0, speech_frames[0] - padding_frames)
+    end_frame = min(num_frames - 1, speech_frames[-1] + padding_frames)
+
+    start_sample = start_frame * frame_len
+    end_sample = min(len(samples), (end_frame + 1) * frame_len)
+    trimmed = samples[start_sample:end_sample]
+
+    min_samples = int(sample_rate * VAD_MIN_SPEECH_MS / 1000)
+    if len(trimmed) < min_samples:
+        # Trimming would leave too little audio; fall back to the original
+        return samples
+
+    return trimmed
+
+
 def get_embedding(audio_bytes):
     wav_buffer = convert_to_wav(audio_bytes)
     wav_buffer.seek(0)
@@ -113,6 +152,11 @@ def get_embedding(audio_bytes):
 
     if sample_rate != 16000:
         waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
+        sample_rate = 16000
+
+    trimmed_samples = trim_silence(waveform.squeeze(0).numpy(), sample_rate)
+    waveform = torch.from_numpy(trimmed_samples).unsqueeze(0)
+
     emb = spkrec.encode_batch(waveform)
     # print(f'emb = {emb}')
     # print(f'emb shape = {np.shape(emb)}')
@@ -250,6 +294,9 @@ def extractTextFromAudio(audio_bytes):
             audio_tensor = torch.from_numpy(audio).unsqueeze(0)
             audio_resampled = torchaudio.functional.resample(audio_tensor, sample_rate, 16000)
             audio = audio_resampled.squeeze(0).numpy()
+            sample_rate = 16000
+
+        audio = trim_silence(audio, sample_rate)
 
         result = whisper_asr_model.transcribe(audio, language="en")
         text = result.get("text", "[No transcription]").strip()
